@@ -42,10 +42,14 @@ from .modules import (
     ColorCorrection,
     CameraResponseFunction,
     ISPPipeline,
+    ISPController,
 )
 
 # -- Task API (high-level workflows) --
 from .tasks import CameraSimulator, PhysicalAugmentation, CameraMatchPair
+
+# -- Regularization Losses --
+from . import losses
 
 # -- Presets --
 from .presets import FilmPreset, load_preset
@@ -164,10 +168,13 @@ __all__ = [
     "ColorCorrection",
     "CameraResponseFunction",
     "ISPPipeline",
+    "ISPController",
     # tasks
     "CameraSimulator",
     "PhysicalAugmentation",
     "CameraMatchPair",
+    # losses
+    "losses",
     # presets
     "FilmPreset",
     "load_preset",

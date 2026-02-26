@@ -172,10 +172,12 @@ class PhysicalAugmentation:
         exposure_range: tuple[float, float] = (-2.0, 2.0),
         vignetting_range: tuple[float, float] = (0.0, 0.3),
         color_jitter: float = 0.02,
+        crf_jitter: float = 0.05,
     ) -> None:
         self.exp_min, self.exp_max = exposure_range
         self.vig_min, self.vig_max = vignetting_range
         self.color_jitter = color_jitter
+        self.crf_jitter = crf_jitter
 
     def __call__(self, image: Tensor) -> Tensor:
         """Apply randomly sampled physical augmentations to *image*.
@@ -222,6 +224,14 @@ class PhysicalAugmentation:
                 "W": jitter(),
             }
             x = apply_color_correction(x, color_offsets)
+
+        # -- Stage 4: Random CRF jitter --
+        if self.crf_jitter > 0.0:
+            crf_jitter = lambda: (
+                torch.empty(3, device=dev, dtype=dtyp)
+                .uniform_(-self.crf_jitter, self.crf_jitter)
+            )
+            x = apply_crf(x, crf_jitter(), crf_jitter(), crf_jitter(), crf_jitter())
 
         return x.clamp(0.0, 1.0)
 

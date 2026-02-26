@@ -29,7 +29,7 @@ class TestCheckImageShape:
         check_image_shape(torch.ones(2, 8, 8, 3))  # batch — should not raise
 
     def test_1d_raises(self):
-        with pytest.raises(PPISPShapeError, match="3D or 4D"):
+        with pytest.raises(PPISPShapeError, match="must be \(H, W, 3\)"):
             check_image_shape(torch.ones(10))
 
     def test_wrong_channel_count_raises(self):

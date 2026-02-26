@@ -38,7 +38,8 @@ class TestGradcheck:
 
     def test_vignetting_gradcheck(self):
         img = _rand64((4, 4, 3))
-        alpha = torch.zeros(3, 3, dtype=torch.float64, requires_grad=True)
+        # Use small negative alpha to stay away from the clamp(1.0) boundary
+        alpha = torch.full((3, 3), -0.01, dtype=torch.float64, requires_grad=True)
         center = torch.zeros(2, dtype=torch.float64, requires_grad=True)
         assert gradcheck(
             apply_vignetting, (img, alpha, center), eps=1e-4, atol=1e-3, fast_mode=True

@@ -63,11 +63,22 @@ def identity_color_offsets() -> dict:
     return {k: torch.zeros(2, dtype=torch.float32) for k in ("R", "G", "B", "W")}
 
 
+from easyppisp.params import (
+    _CRF_TAU_IDENTITY,
+    _CRF_ETA_IDENTITY,
+    _CRF_XI_IDENTITY,
+    _CRF_GAMMA_IDENTITY,
+)
+
+
 @pytest.fixture
 def identity_crf_raw() -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    """CRF raw params that produce approximately tau=eta=1, xi=0.5, gamma=1."""
-    zeros = torch.zeros(3, dtype=torch.float32)
-    return zeros, zeros, zeros, zeros
+    """CRF raw params that produce exactly tau=eta=1, xi=0.5, gamma=1 (identity)."""
+    tau = torch.full((3,), _CRF_TAU_IDENTITY, dtype=torch.float32)
+    eta = torch.full((3,), _CRF_ETA_IDENTITY, dtype=torch.float32)
+    xi = torch.full((3,), _CRF_XI_IDENTITY, dtype=torch.float32)
+    gamma = torch.full((3,), _CRF_GAMMA_IDENTITY, dtype=torch.float32)
+    return tau, eta, xi, gamma
 
 
 # ---------------------------------------------------------------------------

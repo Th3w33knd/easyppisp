@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Sequence
 
 import torch
 from torch import Tensor
@@ -89,10 +89,9 @@ class PipelineParams:
     #   eta   -> 0.3 + softplus(eta_raw)    (highlight power > 0.3)
     #   xi    -> sigmoid(xi_raw)            (inflection in (0, 1))
     #   gamma -> 0.1 + softplus(gamma_raw)  (gamma > 0.1)
-    # Default raw=0: tau=0.3+ln2≈1.0, eta≈1.0, xi=0.5, gamma≈0.8
     # Defaults are pre-computed raw values that yield an IDENTITY transform:
     #   tau_phys=1.0, eta_phys=1.0, xi_phys=0.5, gamma_phys=1.0
-    # This ensures PipelineParams() / ISPPipeline() is a true no-op.
+    # This ensures PipelineParams() / ISPPipeline.from_params(PipelineParams()) is a true no-op.
     crf_tau: Tensor = field(
         default_factory=lambda: torch.full((3,), _CRF_TAU_IDENTITY, dtype=torch.float32)
     )
@@ -135,10 +134,61 @@ class PipelineParams:
                 d.get("vignetting_center", [0.0, 0.0]), dtype=torch.float32
             ),
             color_offsets={k: torch.tensor(v, dtype=torch.float32) for k, v in raw_color.items()},
-            crf_tau=torch.tensor(d.get("crf_tau", [0.0] * 3), dtype=torch.float32),
-            crf_eta=torch.tensor(d.get("crf_eta", [0.0] * 3), dtype=torch.float32),
-            crf_xi=torch.tensor(d.get("crf_xi", [0.0] * 3), dtype=torch.float32),
-            crf_gamma=torch.tensor(d.get("crf_gamma", [0.0] * 3), dtype=torch.float32),
+            crf_tau=torch.tensor(d.get("crf_tau", [_CRF_TAU_IDENTITY] * 3), dtype=torch.float32),
+            crf_eta=torch.tensor(d.get("crf_eta", [_CRF_ETA_IDENTITY] * 3), dtype=torch.float32),
+            crf_xi=torch.tensor(d.get("crf_xi", [_CRF_XI_IDENTITY] * 3), dtype=torch.float32),
+            crf_gamma=torch.tensor(d.get("crf_gamma", [_CRF_GAMMA_IDENTITY] * 3), dtype=torch.float32),
+        )
+
+    @classmethod
+    def from_constrained(
+        cls,
+        exposure_offset: float = 0.0,
+        vignetting_alpha: Tensor | None = None,
+        vignetting_center: Tensor | None = None,
+        color_offsets: dict[str, Tensor] | None = None,
+        crf_tau_phys: Sequence[float] | Tensor = (1.0, 1.0, 1.0),
+        crf_eta_phys: Sequence[float] | Tensor = (1.0, 1.0, 1.0),
+        crf_xi_phys: Sequence[float] | Tensor = (0.5, 0.5, 0.5),
+        crf_gamma_phys: Sequence[float] | Tensor = (1.0, 1.0, 1.0),
+    ) -> "PipelineParams":
+        """Construct from physical (constrained) values.
+
+        Automatically inverts the softplus/sigmoid constraints to store the
+        underlying raw parameters.
+
+        Args:
+            exposure_offset: Δt in EV.
+            vignetting_alpha: (3, 3) coeffs.
+            vignetting_center: (2,) center.
+            color_offsets: Dict of chromaticity offsets.
+            crf_tau_phys: Physical shadow power (tau > 0.3).
+            crf_eta_phys: Physical highlight power (eta > 0.3).
+            crf_xi_phys: Physical inflection point (0 < xi < 1).
+            crf_gamma_phys: Physical gamma (gamma > 0.1).
+        """
+        def softplus_inv(y, min_val):
+            v = max(1e-6, y - min_val)
+            return math.log(math.expm1(v))
+
+        def sigmoid_inv(y):
+            y = max(1e-6, min(1.0 - 1e-6, y))
+            return math.log(y / (1.0 - y))
+
+        tau_raw   = torch.tensor([softplus_inv(t, 0.3) for t in crf_tau_phys], dtype=torch.float32)
+        eta_raw   = torch.tensor([softplus_inv(e, 0.3) for e in crf_eta_phys], dtype=torch.float32)
+        xi_raw    = torch.tensor([sigmoid_inv(x) for x in crf_xi_phys], dtype=torch.float32)
+        gamma_raw = torch.tensor([softplus_inv(g, 0.1) for g in crf_gamma_phys], dtype=torch.float32)
+
+        return cls(
+            exposure_offset=exposure_offset,
+            vignetting_alpha=vignetting_alpha if vignetting_alpha is not None else torch.zeros((3, 3)),
+            vignetting_center=vignetting_center if vignetting_center is not None else torch.zeros(2),
+            color_offsets=color_offsets if color_offsets is not None else cls().color_offsets,
+            crf_tau=tau_raw,
+            crf_eta=eta_raw,
+            crf_xi=xi_raw,
+            crf_gamma=gamma_raw,
         )
 
     def save(self, path: str) -> None:

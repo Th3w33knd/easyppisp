@@ -32,59 +32,14 @@ from .modules import (
 # Built-in Preset Database
 # ---------------------------------------------------------------------------
 
-# CRF raw → physical conversion (for reference):
-#   tau_phys   = 0.3 + softplus(tau_raw)
-#   eta_phys   = 0.3 + softplus(eta_raw)
-#   xi_phys    = sigmoid(xi_raw)
-#   gamma_phys = 0.1 + softplus(gamma_raw)
-# At raw=0: tau≈1.0, eta≈1.0, xi=0.5, gamma≈0.8
-
-def _make_crf_raw(tau_phys, eta_phys, xi_phys, gamma_phys):
-    """Convert physical CRF values back to raw space for storage in PipelineParams."""
-    import torch.nn.functional as F
-
-    def softplus_inv(y, min_val):
-        """Inverse of (min_val + softplus(x)) — solve for x."""
-        v = max(1e-6, y - min_val)
-        return float(torch.log(torch.expm1(torch.tensor(v))))
-
-    def sigmoid_inv(y):
-        y = max(1e-6, min(1.0 - 1e-6, y))
-        return float(torch.log(torch.tensor(y / (1.0 - y))))
-
-    tau   = torch.tensor([softplus_inv(t, 0.3) for t in tau_phys])
-    eta   = torch.tensor([softplus_inv(e, 0.3) for e in eta_phys])
-    xi    = torch.tensor([sigmoid_inv(x) for x in xi_phys])
-    gamma = torch.tensor([softplus_inv(g, 0.1) for g in gamma_phys])
-    return tau, eta, xi, gamma
-
-
-# identity CRF (tau=eta=1, xi=0.5, gamma=1)
-_id_tau, _id_eta, _id_xi, _id_gamma = _make_crf_raw(
-    [1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [0.5, 0.5, 0.5], [1.0, 1.0, 1.0]
-)
-
-# Kodak Portra 400: warm skin tones, slight lift in shadows, soft highlights
-_kp_tau, _kp_eta, _kp_xi, _kp_gamma = _make_crf_raw(
-    [0.9, 0.95, 0.85],
-    [1.1, 1.0,  1.2],
-    [0.45, 0.48, 0.42],
-    [0.78, 0.80, 0.75],
-)
-
-# Fuji Velvia 50 (slide film): vivid, punchy, high contrast
-_fv_tau, _fv_eta, _fv_xi, _fv_gamma = _make_crf_raw(
-    [1.3, 1.2, 1.4],
-    [0.9, 0.85, 0.95],
-    [0.52, 0.50, 0.55],
-    [0.9, 0.95, 0.88],
-)
-
+# ---------------------------------------------------------------------------
+# Built-in Preset Database
+# ---------------------------------------------------------------------------
 
 _BUILTIN_PRESETS: dict[str, PipelineParams] = {
     "default": PipelineParams(),   # pure identity
 
-    "kodak_portra_400": PipelineParams(
+    "kodak_portra_400": PipelineParams.from_constrained(
         vignetting_alpha=torch.tensor([
             [-0.15,  0.02, -0.001],  # Red channel
             [-0.15,  0.02, -0.001],  # Green channel
@@ -96,10 +51,13 @@ _BUILTIN_PRESETS: dict[str, PipelineParams] = {
             "B": torch.tensor([ 0.00, -0.02]),
             "W": torch.tensor([ 0.01,  0.01]),
         },
-        crf_tau=_kp_tau, crf_eta=_kp_eta, crf_xi=_kp_xi, crf_gamma=_kp_gamma,
+        crf_tau_phys=[0.9, 0.95, 0.85],
+        crf_eta_phys=[1.1, 1.0,  1.2],
+        crf_xi_phys=[0.45, 0.48, 0.42],
+        crf_gamma_phys=[0.78, 0.80, 0.75],
     ),
 
-    "fuji_velvia_50": PipelineParams(
+    "fuji_velvia_50": PipelineParams.from_constrained(
         vignetting_alpha=torch.tensor([
             [-0.20,  0.03, -0.002],
             [-0.20,  0.03, -0.002],
@@ -111,11 +69,17 @@ _BUILTIN_PRESETS: dict[str, PipelineParams] = {
             "B": torch.tensor([ 0.00, -0.03]),
             "W": torch.tensor([ 0.00,  0.00]),
         },
-        crf_tau=_fv_tau, crf_eta=_fv_eta, crf_xi=_fv_xi, crf_gamma=_fv_gamma,
+        crf_tau_phys=[1.3, 1.2, 1.4],
+        crf_eta_phys=[0.9, 0.85, 0.95],
+        crf_xi_phys=[0.52, 0.50, 0.55],
+        crf_gamma_phys=[0.9, 0.95, 0.88],
     ),
 
-    "identity": PipelineParams(
-        crf_tau=_id_tau, crf_eta=_id_eta, crf_xi=_id_xi, crf_gamma=_id_gamma,
+    "identity": PipelineParams.from_constrained(
+        crf_tau_phys=[1.0, 1.0, 1.0],
+        crf_eta_phys=[1.0, 1.0, 1.0],
+        crf_xi_phys=[0.5, 0.5, 0.5],
+        crf_gamma_phys=[1.0, 1.0, 1.0],
     ),
 }
 

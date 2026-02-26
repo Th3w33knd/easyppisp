@@ -2,7 +2,7 @@
 Tests for the nn.Module API (easyppisp.modules).
 
 Covers: composability, independent usage, physical ordering warning,
-parameter export, from_params, state_dict round-trip.
+parameter export, from_params, state_dict round-trip, ISPController.
 
 SPDX-License-Identifier: Apache-2.0
 """
@@ -18,9 +18,10 @@ from easyppisp.modules import (
     ColorCorrection,
     CameraResponseFunction,
     ISPPipeline,
+    ISPController,
 )
 from easyppisp.params import PipelineParams, PipelineResult
-from easyppisp.validation import PPISPPhysicsWarning
+from easyppisp.validation import PPISPPhysicsWarning, PPISPShapeError
 
 
 # ===========================================================================
@@ -121,12 +122,14 @@ class TestCameraResponseFunction:
         """Physical parameters in get_params_dict should satisfy constraints."""
         mod = CameraResponseFunction()
         d = mod.get_params_dict()
-        for val in d["crf_tau"]:
-            assert val > 0.3, "tau should be > 0.3"
-        for val in d["crf_gamma"]:
-            assert val > 0.1, "gamma should be > 0.1"
-        for val in d["crf_xi"]:
-            assert 0.0 < val < 1.0, "xi should be in (0, 1)"
+        for val in d["crf_tau_phys"]:
+            assert val > 0.3
+        for val in d["crf_eta_phys"]:
+            assert val > 0.3
+        for val in d["crf_xi_phys"]:
+            assert 0.0 < val < 1.0
+        for val in d["crf_gamma_phys"]:
+            assert val > 0.1
 
 
 # ===========================================================================
@@ -204,3 +207,33 @@ class TestISPPipeline:
         pipeline = ISPPipeline()
         result = pipeline(img_hwc_batch)
         assert result.final.shape == img_hwc_batch.shape
+
+
+# ===========================================================================
+# ISPController
+# ===========================================================================
+
+
+class TestISPController:
+    def test_forward_basic(self):
+        mod = ISPController()
+        img = torch.rand(32, 32, 3)
+        out = mod(img)
+        assert "exposure_offset" in out
+        assert "color_params_flat" in out
+        assert out["exposure_offset"].shape == (1, 1)
+        assert out["color_params_flat"].shape == (1, 8)
+
+    def test_forward_batch(self):
+        mod = ISPController()
+        img = torch.rand(2, 32, 32, 3)
+        out = mod(img)
+        assert out["exposure_offset"].shape == (2, 1)
+        assert out["color_params_flat"].shape == (2, 8)
+
+    def test_prior_exposure(self):
+        mod = ISPController()
+        img = torch.rand(32, 32, 3)
+        prior = torch.tensor(1.5)
+        out = mod(img, prior_exposure=prior)
+        assert out["exposure_offset"].shape == (1, 1)

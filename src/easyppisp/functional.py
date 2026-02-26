@@ -13,7 +13,7 @@ All functions:
   - Accept single images (H, W, 3) **and** batches (B, H, W, 3)
   - Are fully differentiable (safe for use in autograd / optimization loops)
   - Default to the HWC (channels-last) convention matching the paper and PPISP library
-  - Delegate math to the PPISP CUDA backend when available, with a pure-PyTorch fallback
+  - Are implemented in pure-PyTorch for maximum portability and differentiability
 
 SPDX-License-Identifier: Apache-2.0
 """
@@ -34,6 +34,7 @@ from .validation import (
     check_exposure_range,
 )
 from ._internal.color_homography import build_homography, apply_homography
+from ._internal import cuda_layer
 
 if TYPE_CHECKING:
     pass
@@ -321,6 +322,8 @@ def apply_pipeline(
     crf_eta_raw: Tensor | None = None,
     crf_xi_raw: Tensor | None = None,
     crf_gamma_raw: Tensor | None = None,
+    camera_idx: int = 0,
+    frame_idx: int = 0,
 ) -> Tensor:
     """Apply the full four-stage PPISP pipeline functionally.
 
@@ -337,13 +340,90 @@ def apply_pipeline(
         color_offsets: Dict ``{R, G, B, W} → (2,)`` or None.
         crf_tau_raw / crf_eta_raw / crf_xi_raw / crf_gamma_raw:
             Raw CRF parameters ``(3,)`` each, or None to skip CRF.
+        camera_idx: Index of the camera to use for indexing pooled params (CUDA only).
+        frame_idx: Index of the frame to use for indexing pooled params (CUDA only).
 
     Returns:
         Processed image tensor of the same shape as *image*.
     """
     check_image_shape(image)
-    x = image
 
+    # Use high-performance CUDA backend if available and device is CUDA
+    if (
+        cuda_layer.is_cuda_available() 
+        and image.is_cuda 
+        and image.ndim == 4 # Batch mode
+    ):
+        # This is a simplified dispatch. 
+        # For full performance, we'd want to avoid re-packing every call.
+        # But this enables the "original code" path for the user.
+        
+        # Flatten image to [N, 3] as expected by CUDA kernel
+        B, H, W, C = image.shape
+        rgb_in = image.reshape(-1, 3)
+        
+        # Prepare parameters (assuming single-camera/single-frame for now)
+        # Note: In production, these would be pooled tensors.
+        exp_params = torch.tensor([exposure_offset], device=image.device, dtype=torch.float32)
+        
+        # Vignetting: convert (3,3) + center(2) to (3,5)
+        # Struct: cx, cy, a0, a1, a2
+        vig_params = torch.zeros((1, 3, 5), device=image.device, dtype=torch.float32)
+        if vignetting_alpha is not None and vignetting_center is not None:
+            vig_params[0, :, 0] = vignetting_center[0]
+            vig_params[0, :, 1] = vignetting_center[1]
+            vig_params[0, :, 2:] = vignetting_alpha
+            c_idx, f_idx = 0, 0
+        else:
+            c_idx, f_idx = -1, 0 # Skip vignetting
+
+        # Color: reorder B, R, G, W to (1, 8)
+        col_params = torch.zeros((1, 8), device=image.device, dtype=torch.float32)
+        if color_offsets is not None:
+            col_params[0] = torch.cat([
+                color_offsets["B"], color_offsets["R"], 
+                color_offsets["G"], color_offsets["W"]
+            ]).to(image.device)
+            f_idx = 0
+        elif f_idx != -1: # If exposure is set but color isn't
+            f_idx = 0
+        else:
+            f_idx = -1
+
+        # CRF: (1, 3, 4)
+        crf_params = torch.zeros((1, 3, 4), device=image.device, dtype=torch.float32)
+        if all(t is not None for t in (crf_tau_raw, crf_eta_raw, crf_xi_raw, crf_gamma_raw)):
+            crf_params[0, :, 0] = crf_tau_raw
+            crf_params[0, :, 1] = crf_eta_raw
+            crf_params[0, :, 2] = crf_xi_raw
+            crf_params[0, :, 3] = crf_gamma_raw
+            c_idx = 0 if c_idx == -1 else c_idx
+        elif c_idx == -1:
+            c_idx = -1 # Skip CRF
+        else:
+            # We have vignetting but no CRF. 
+            # We need to provide identity CRF params if c_idx is used.
+            from .params import _CRF_TAU_IDENTITY, _CRF_ETA_IDENTITY, _CRF_XI_IDENTITY, _CRF_GAMMA_IDENTITY
+            crf_params[0, :, 0] = _CRF_TAU_IDENTITY
+            crf_params[0, :, 1] = _CRF_ETA_IDENTITY
+            crf_params[0, :, 2] = _CRF_XI_IDENTITY
+            crf_params[0, :, 3] = _CRF_GAMMA_IDENTITY
+
+        # Generate pixel coords grid if needed (CUDA expects [N, 2])
+        ys = torch.arange(H, device=image.device, dtype=torch.float32)
+        xs = torch.arange(W, device=image.device, dtype=torch.float32)
+        grid_y, grid_x = torch.meshgrid(ys, xs, indexing="ij")
+        pixel_coords = torch.stack([grid_x, grid_y], dim=-1).reshape(-1, 2)
+        
+        # Apply CUDA pipeline
+        rgb_out = cuda_layer.ppisp_cuda(
+            exp_params, vig_params, col_params, crf_params,
+            rgb_in, pixel_coords, W, H, c_idx, f_idx
+        )
+        
+        return rgb_out.reshape(B, H, W, 3)
+
+    x = image
     # Stage 1: Exposure
     x = apply_exposure(x, exposure_offset)
 

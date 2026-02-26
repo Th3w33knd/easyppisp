@@ -43,18 +43,32 @@ x = apply_crf(x, tau_raw, eta_raw, xi_raw, gamma_raw)  # tone map
 ### Module API — composable `nn.Module` wrappers
 
 ```python
-from easyppisp import ISPPipeline, ExposureOffset, Vignetting, CameraResponseFunction
+from easyppisp import ISPPipeline, ExposureOffset, Vignetting, ISPController, CameraResponseFunction
 
 # Custom pipeline — only the stages you need, in any order
 pipeline = ISPPipeline([
     ExposureOffset(delta_t=-0.5),
-    Vignetting(alpha=torch.tensor([[-0.2, 0.0, 0.0]] * 3)),
+    Vignetting(),
     CameraResponseFunction(),
 ])
 
-result = pipeline(image, return_intermediates=True)
-print(result.intermediates.keys())
-# dict_keys(['ExposureOffset', 'Vignetting', 'CameraResponseFunction'])
+# Predictive Controller (Eq. 17)
+# Predicts exposure/color from image context
+controller = ISPController()
+preds = controller(image) # returns {'exposure_offset', 'color_params_flat'}
+```
+
+### Regularization Losses (Eq. 18–22)
+
+```python
+from easyppisp import losses
+
+# Resolve Exposure ↔ SH ambiguity
+l1 = losses.exposure_mean_loss(exposure_params)
+# Enforce physical vignetting (α ≤ 0)
+l2 = losses.vignetting_non_pos_loss(vignetting_alpha)
+# Encourage channel-consistent CRF S-curves
+l3 = losses.crf_channel_var_loss(tau, eta, xi, gamma)
 ```
 
 ### Task API — high-level workflows
@@ -68,14 +82,8 @@ cam.set_exposure(-0.5)
 result = cam(image)
 
 # Thread-safe data augmentation for DataLoaders
-aug = PhysicalAugmentation(exposure_range=(-2.0, 2.0), vignetting_range=(0, 0.3))
-augmented = aug(batch)   # safe with num_workers > 0
-
-# Camera-to-camera matching
-matcher = CameraMatchPair()
-matcher.fit(source_images, target_images, num_steps=500)
-matched = matcher.transform(new_image)
-matcher.save_params("sony_to_iphone.json")
+aug = PhysicalAugmentation(exposure_range=(-2.0, 2.0))
+augmented = aug(batch)   # sampled per-call, safe for multi-worker DL
 ```
 
 ### Presets
