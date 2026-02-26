@@ -53,17 +53,35 @@ filterwarnings = [
     "ignore::DeprecationWarning",
 ]
 
-[tool.pixi.project]
-channels = ["conda-forge", "pytorch"]
-platforms = ["linux-64"]
+[tool.pixi.workspace]
+channels = ["nvidia", "conda-forge", "pytorch"]
+platforms = ["linux-64", "win-64"]
 
 [tool.pixi.dependencies]
 python = "3.10.*"
-pytorch = ">=2.0.0"
-torchvision = "*"
+pip = "*"
+setuptools = "*"
 numpy = "*"
 pytest = ">=7.4"
 pillow = ">=10.0"
+ninja = "*"
+
+[tool.pixi.feature.gpu.system-requirements]
+cuda = "12"
+
+[tool.pixi.feature.gpu.dependencies]
+pytorch-gpu = ">=2.0.0"
+torchvision = "*"
+cuda = { version = "*", channel = "nvidia" }
+
+[tool.pixi.feature.cpu.dependencies]
+pytorch-cpu = ">=2.0.0"
+torchvision = "*"
+
+[tool.pixi.environments]
+default = { features = ["cpu"] }
+gpu = { features = ["gpu"] }
 
 [tool.pixi.tasks]
 build-cuda-docker = "docker run --rm -v /workspaces/easyppisp:/workspaces/easyppisp -w /workspaces/easyppisp nvidia/cuda:11.8.0-devel-ubuntu22.04 /bin/bash /workspaces/easyppisp/src/easyppisp/_internal/cuda/compile_cuda.sh"
+build-cuda-local = "python src/easyppisp/_internal/cuda/setup.py build_ext --inplace"

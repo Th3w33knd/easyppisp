@@ -314,6 +314,8 @@ def apply_crf(
 
 def apply_pipeline(
     image: Tensor,
+    params: Optional["PipelineParams"] = None,
+    *,
     exposure_offset: float | Tensor = 0.0,
     vignetting_alpha: Tensor | None = None,
     vignetting_center: Tensor | None = None,
@@ -330,23 +332,30 @@ def apply_pipeline(
     Stages are applied in the physically correct order:
     Exposure → Vignetting → Color Correction → CRF.
 
-    Any stage whose parameters are ``None`` is skipped (identity).
-
     Args:
         image: Linear radiance image ``(H, W, 3)`` or ``(B, H, W, 3)``.
-        exposure_offset: Δt in EV (default 0.0 = no change).
-        vignetting_alpha: ``(3, 3)`` polynomial coefficients or None.
-        vignetting_center: ``(2,)`` optical center or None.
-        color_offsets: Dict ``{R, G, B, W} → (2,)`` or None.
+        params: Optional PipelineParams object to use for parameters.
+        exposure_offset: Δt in EV (used if params is None).
+        vignetting_alpha: (3, 3) polynomial coefficients or None.
+        vignetting_center: (2,) optical center or None.
+        color_offsets: Dict {R, G, B, W} → (2,) or None.
         crf_tau_raw / crf_eta_raw / crf_xi_raw / crf_gamma_raw:
-            Raw CRF parameters ``(3,)`` each, or None to skip CRF.
+            Raw CRF parameters (3,) each, or None to skip CRF.
         camera_idx: Index of the camera to use for indexing pooled params (CUDA only).
         frame_idx: Index of the frame to use for indexing pooled params (CUDA only).
-
-    Returns:
-        Processed image tensor of the same shape as *image*.
     """
     check_image_shape(image)
+
+    # If params is provided, unpack it
+    if params is not None:
+        exposure_offset = params.exposure_offset
+        vignetting_alpha = params.vignetting_alpha
+        vignetting_center = params.vignetting_center
+        color_offsets = params.color_offsets
+        crf_tau_raw = params.crf_tau
+        crf_eta_raw = params.crf_eta
+        crf_xi_raw = params.crf_xi
+        crf_gamma_raw = params.crf_gamma
 
     # Use high-performance CUDA backend if available and device is CUDA
     if (

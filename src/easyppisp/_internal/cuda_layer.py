@@ -112,12 +112,26 @@ def _try_load_cuda():
             ]
             # Check if sources exist
             if all(os.path.exists(s) for s in sources):
-                logger.info("JIT compiling EasyPPISP CUDA extension...")
+                # Try to find CCCL headers in the current environment
+                extra_include_paths = []
+                for p in sys.path:
+                    # Check for Pip-installed CUDA toolkit components (cccl)
+                    # Versions can vary, so we look for 'nvidia' directories
+                    nvidia_base = os.path.join(p, "nvidia")
+                    if os.path.exists(nvidia_base):
+                        for cu_dir in os.listdir(nvidia_base):
+                            cccl_path = os.path.join(nvidia_base, cu_dir, "include", "cccl")
+                            if os.path.exists(cccl_path):
+                                extra_include_paths.append(cccl_path)
+                                break
+                
+                logger.info(f"JIT compiling EasyPPISP CUDA extension (extra_includes={extra_include_paths})...")
                 _PPISP_CUDA = load(
                     name="ppisp_cuda",
                     sources=sources,
                     extra_cflags=["-O3"],
                     extra_cuda_cflags=["-O3", "--use_fast_math"],
+                    extra_include_paths=extra_include_paths,
                     verbose=False
                 )
                 _CUDA_AVAILABLE = True
